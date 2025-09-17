@@ -56,7 +56,7 @@ def init_db():
       user_id TEXT,
       mode TEXT,
       status TEXT DEFAULT 'active',
-      summary TEXT DEFAULT '',              -- <-- added here; used by code below
+      summary TEXT DEFAULT '',
       started_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
@@ -79,12 +79,10 @@ def init_db():
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     );
     """)
-    # gentle, idempotent migrations for existing DBs
     try: conn.execute("ALTER TABLE users ADD COLUMN user_summary TEXT DEFAULT ''")
     except Exception: pass
     try: conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''")
     except Exception: pass
-
     conn.commit()
 
 init_db()
@@ -106,7 +104,7 @@ class MessageCreate(BaseModel):
 # ------------ Therapy Prompts & Checks ------------
 SYSTEM_PROMPT = """
 export const SYSTEM_PROMPT = `
-You are Lumen, the Angel voice in a mental-health wellness app called **XOVIA* and under *Two Chairs Dialogue.
+You are Lumen, the Angel voice in a mental-health wellness app called **XOVIA** under the *Two Chairs Dialogue*.
 
 ## Mission & Boundaries
 - Help users explore Self vs Monster (inner critic).
@@ -137,22 +135,7 @@ You are Lumen, the Angel voice in a mental-health wellness app called **XOVIA* a
 - CYCLE_READY: true → 2–4 short paragraphs + one specific next step.
 - CYCLE_READY: false → one-sentence coaching prompt.
 - No diagnosis. No medical claims. No long lectures.
-
-Follow these rules exactly.
 `;
-
-ZERO-ECHO RULE:
-- Never repeat or paraphrase the Monster’s negative wording (labels etc.).
-- Refer to it indirectly (e.g., “that harsh thought”, “that fear”, “that heavy story”).
-
-
-
-"""
-TEACHING_COPY = """Two Chairs Dialogue:
-This is a short exercise where your "True Self" and your "Inner Critic (Monster)" take turns.
-• Step 1: Write as your True Self (what you hope, believe, or want).
-• Step 2: Write as your Monster (the discouraging voice).
-Repeat for 3 exchanges (Self → Monster) × 3. After that, I (Lumen) will respond with support and one practical next step.
 """
 
 CRISIS_PATTERNS = [
@@ -184,9 +167,9 @@ NEGATIVE_HINTS = [
 USE_MODEL_TONE = False
 
 # --- Memory knobs (make recall easy) ---
-ALWAYS_INCLUDE_SESSION_SUMMARY = False    # always include session summary once it exists
-ALWAYS_INCLUDE_USER_SUMMARY    = False   # set True if you pass a stable userId across sessions
-MIN_OVERLAP                    = 2       # not used when ALWAYS_* is True, but keep it lenient
+ALWAYS_INCLUDE_SESSION_SUMMARY = False
+ALWAYS_INCLUDE_USER_SUMMARY    = False
+MIN_OVERLAP                    = 2
 
 def check_crisis_local(text: str) -> bool:
     return any(rx.search(text) for rx in CRISIS_PATTERNS)
@@ -280,6 +263,96 @@ def classify_negatives_with_model(texts: List[str]) -> List[bool]:
         pass
     return [looks_negative_local(t) for t in texts]
 
+# --------- NEW: personalised suggestions using the WHOLE current conversation ---------
+def _truncate(s: str, limit: int) -> str:
+    if len(s) <= limit: return s
+    return s[:limit-1] + "…"
+
+def generate_self_suggestions_full_context(selfs: List[str], monsters: List[str]) -> List[str]:
+    """
+    Create 4 short, first-person, compassionate SELF reply ideas for the *next* round.
+    Personalises using the WHOLE current cycle (all SELF + MONSTER lines so far).
+    Guardrails:
+      - 6–14 words
+      - begin with 'I …'
+      - ZERO-ECHO: do not repeat harsh labels/slurs
+      - provide variety: (1) validate/feelings, (2) strengths/values/effort, (3) tiny step/plan, (4) kinder reframe
+    """
+    # Build compact context list like "SELF1: ..., MONSTER1: ..."
+    pairs = []
+    for i in range(max(len(selfs), len(monsters))):
+        if i < len(selfs):
+            pairs.append(f"SELF{i+1}: {selfs[i]}")
+        if i < len(monsters):
+            pairs.append(f"MONSTER{i+1}: {monsters[i]}")
+    convo = _truncate(" | ".join(pairs), 1600)  # keep token usage in check
+
+    last_self = selfs[-1] if selfs else ""
+    last_mon  = monsters[-1] if monsters else ""
+
+    prompt = f"""
+Return JSON only: {{"suggestions":["...","...","...","..."]}}
+
+You are a supportive coach in a Two Chairs exercise (Self vs Monster).
+Write 4 *first-person* reply ideas the user (SELF) could try next, using the FULL context below.
+
+FULL CONTEXT (ordered):
+{convo}
+
+Most recent SELF: {last_self!r}
+Most recent MONSTER: {last_mon!r}
+
+Rules:
+- ZERO-ECHO: don't repeat the critic's harsh labels; refer indirectly (e.g., "that harsh thought").
+- 6–14 words each. Start every line with “I ”.
+- Provide this spread:
+  1) gently name/validate the feeling,
+  2) remind a strength/value or prior effort from context,
+  3) propose one tiny next step the user can actually do soon,
+  4) offer a kinder reframe of the situation.
+- Context-specific, natural phrasing (avoid generic platitudes).
+- No clinical claims. No toxic positivity. No questions.
+"""
+    try:
+        resp = client.responses.create(
+            model=REPLY_MODEL, temperature=0.2,
+            input=[
+                {"role": "system", "content": "Return only valid JSON. No preface."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        data = json.loads(parse_output_text(resp))
+        sugs = data.get("suggestions") or []
+        clean = []
+        for s in sugs:
+            if not isinstance(s, str): continue
+            s = s.strip()
+            if not s.lower().startswith("i "): continue
+            wc = len(s.split())
+            if 6 <= wc <= 14:
+                clean.append(s)
+        # Fallbacks (neutral but session-aware phrasing)
+        if len(clean) < 4:
+            fallback = [
+                "I notice what I’m feeling, and it makes sense right now.",
+                "I can recognise my effort and let that count for something.",
+                "I’ll take one small step next, then give myself a short break.",
+                "I’m learning to speak to myself with a kinder voice.",
+            ]
+            clean = (clean + fallback)[:4]
+        # de-dup
+        uniq = []
+        for s in clean:
+            if s not in uniq: uniq.append(s)
+        return uniq[:4]
+    except Exception:
+        return [
+            "I notice what I’m feeling, and it makes sense right now.",
+            "I can recognise my effort and let that count for something.",
+            "I’ll take one small step next, then give myself a short break.",
+            "I’m learning to speak to myself with a kinder voice.",
+        ]
+
 # ------------ DB Helpers ------------
 def insert_user(display_name: Optional[str], trusted_contact: Optional[str]) -> str:
     uid = uuid.uuid4().hex
@@ -356,10 +429,9 @@ def create_user(body: UserCreate):
 
 @app.post("/api/session")
 def create_session(body: SessionCreate):
-    # if no userId passed, create an anonymous user so future memory can attach
     uid = body.userId or insert_user(display_name=None, trusted_contact=None)
     sid = insert_session(uid, body.mode or "two-chairs")
-    return {"sessionId": sid, "userId": uid, "teach": TEACHING_COPY}
+    return {"sessionId": sid, "userId": uid, "teach": "Two Chairs ready."}
 
 @app.get("/api/session/{session_id}/messages")
 def get_messages(session_id: str):
@@ -383,12 +455,12 @@ def post_message(body: MessageCreate):
     status = get_session_status(body.sessionId)
     if status == "crisis":
         return {
-        "crisis": True,
-        "locked": True,
-        "alertMessage": "We identified harmful words in your conversation. Life is worth living — you are not alone.",
-        "hotlinesUrl": SOS_HOTLINES_URL,
-        "resourcesUrl": SOS_RESOURCES_URL
-    }
+            "crisis": True,
+            "locked": True,
+            "alertMessage": "We identified harmful words in your conversation. Life is worth living — you are not alone.",
+            "hotlinesUrl": SOS_HOTLINES_URL,
+            "resourcesUrl": SOS_RESOURCES_URL
+        }
 
     # local crisis
     if check_crisis_local(text):
@@ -396,16 +468,15 @@ def post_message(body: MessageCreate):
         insert_alert(body.sessionId, "crisis", {"matched": "keyword"})
         set_session_status(body.sessionId, "crisis")
         return {
-        "crisis": True,
-        "locked": True,
-        "alertMessage": "We identified harmful words in your conversation. Life is worth living — you are not alone.",
-        "hotlinesUrl": SOS_HOTLINES_URL,
-        "resourcesUrl": SOS_RESOURCES_URL,
-        "notifiedTrustedContact": False
-    }
+            "crisis": True,
+            "locked": True,
+            "alertMessage": "We identified harmful words in your conversation. Life is worth living — you are not alone.",
+            "hotlinesUrl": SOS_HOTLINES_URL,
+            "resourcesUrl": SOS_RESOURCES_URL,
+            "notifiedTrustedContact": False
+        }
 
-
-    # moderation
+    # moderation (OpenAI)
     try:
         mod = client.moderations.create(model=MOD_MODEL, input=text)
         flagged = False
@@ -418,62 +489,63 @@ def post_message(body: MessageCreate):
             insert_alert(body.sessionId, "crisis", {"matched": "moderation"})
             set_session_status(body.sessionId, "crisis")
             return {
-        "crisis": True,
-        "locked": True,
-        "alertMessage": "We identified harmful words in your conversation. Life is worth living — you are not alone.",
-        "hotlinesUrl": SOS_HOTLINES_URL,
-        "resourcesUrl": SOS_RESOURCES_URL,
-        "notifiedTrustedContact": False
-        }
-
+                "crisis": True,
+                "locked": True,
+                "alertMessage": "We identified harmful words in your conversation. Life is worth living — you are not alone.",
+                "hotlinesUrl": SOS_HOTLINES_URL,
+                "resourcesUrl": SOS_RESOURCES_URL,
+                "notifiedTrustedContact": False
+            }
     except Exception:
         pass
 
-    # store
+    # store the message
     insert_message(body.sessionId, body.role, text)
 
-    # cycle
+    # figure out cycle progress
     selfs, monsters = get_current_cycle(body.sessionId)
     total = len(selfs) + len(monsters)
+
+    # -------- Suggestions after ANY Monster turn while cycle isn't complete --------
     if total < 6:
-        return {
+        payload = {
             "awaitMore": True,
             "have": {"self": len(selfs), "monster": len(monsters)},
             "need": 6 - total
         }
+        # If last message was Monster → next input is SELF → include 4 suggestions using FULL CONTEXT
+        if body.role == "monster" and len(monsters) >= 1 and len(selfs) == len(monsters):
+            payload["suggestions"] = generate_self_suggestions_full_context(selfs, monsters)
+        return payload
+    # -----------------------------------------------------------------------------
 
-    
-        # tone
+    # tone (for safety popup after full cycle)
     if USE_MODEL_TONE:
         self_labels = classify_negatives_with_model(selfs)
     else:
         self_labels = [looks_negative_local(t) for t in selfs]
 
-    # memory composition (less picky)
+    # memory composition
     current_round_text = " ".join(selfs + monsters)
-
     session_summary = get_sql_summary(body.sessionId)
     user_id = get_user_id_for_session(body.sessionId)
     user_summary = get_user_summary(user_id) if user_id else ""
 
-    # Always include summaries once they exist (no keyword gating)
     use_session_summary = bool(session_summary) if ALWAYS_INCLUDE_SESSION_SUMMARY else \
         is_connected_to_summary(current_round_text, session_summary, min_overlap=MIN_OVERLAP)
-
     use_user_summary = bool(user_summary) if ALWAYS_INCLUDE_USER_SUMMARY else \
         is_connected_to_summary(current_round_text, user_summary, min_overlap=MIN_OVERLAP)
 
     twc_block = build_two_chairs_prompt(selfs, monsters)
-
     parts = []
     if use_user_summary and user_summary:
         parts.append("Long-term context (previous sessions):\n" + user_summary)
     if use_session_summary and session_summary:
         parts.append("This-session context so far:\n" + session_summary)
     parts.append(twc_block)
-
     composed = "\n\n".join(parts)
 
+    # final Lumen reply after 6 messages
     ai = client.responses.create(
         model=REPLY_MODEL,
         temperature=0.3,
@@ -485,8 +557,7 @@ def post_message(body: MessageCreate):
     reply = parse_output_text(ai)
     insert_message(body.sessionId, "angel", reply)
 
-
-    # update rolling session summary
+    # (optional) rolling session summary update — best-effort
     try:
         cur = conn.cursor()
         cur.execute(
@@ -512,7 +583,7 @@ def post_message(body: MessageCreate):
     except Exception:
         pass
 
-    # safety popup
+    # safety popup if all 3 SELF entries look negative
     all_three_negative = (len(self_labels) == 3 and all(bool(x) for x in self_labels))
     safety = None
     if all_three_negative:
@@ -531,8 +602,8 @@ def post_message(body: MessageCreate):
         "safety": safety,
         "next": {"askToContinue": True}
     }
+
 # ------------- Notes (run with uvicorn) -------------
-# pip install fastapi uvicorn python-dotenv openai pydantic
+# pip install -r requirements.txt
 # uvicorn server:app --reload --host 0.0.0.0 --port 3000
 # http://127.0.0.1:3000/api/health
-# open tester.html

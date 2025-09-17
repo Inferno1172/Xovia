@@ -522,3 +522,21 @@ body {
         .bubble { border-width: 2px; }
     }
  
+
+
+    /* Space out the suggestion bars inside the card */
+#cards .card .ghost + .ghost {
+  margin-top: 10px;          /* gap between each bar */
+}
+
+/* Give the heading a bit more breathing room above the first bar */
+#cards .card h4 {
+  margin-bottom: 8px;        /* was 4px earlier */
+}
+
+/* (optional) slightly larger touch target on mobile */
+@media (max-width: 420px) {
+  #cards .card .ghost {
+    padding: 12px 12px;
+  }
+}
