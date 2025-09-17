@@ -603,6 +603,11 @@ def post_message(body: MessageCreate):
         "next": {"askToContinue": True}
     }
 
+from fastapi.staticfiles import StaticFiles
+
+# Serve everything in ./public at /
+app.mount("/", StaticFiles(directory="public", html=True), name="public")
+
 # ------------- Notes (run with uvicorn) -------------
 # pip install -r requirements.txt
 # uvicorn server:app --reload --host 0.0.0.0 --port 3000
