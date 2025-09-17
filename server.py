@@ -271,15 +271,6 @@ def _truncate(s: str, limit: int) -> str:
     return s[:limit-1] + "…"
 
 def generate_self_suggestions_full_context(selfs: List[str], monsters: List[str]) -> List[str]:
-    """
-    Create 4 short, first-person, compassionate SELF reply ideas for the *next* round.
-    Personalises using the WHOLE current cycle (all SELF + MONSTER lines so far).
-    Guardrails:
-      - 6–14 words
-      - begin with 'I …'
-      - ZERO-ECHO: do not repeat harsh labels/slurs
-      - provide variety: (1) validate/feelings, (2) strengths/values/effort, (3) tiny step/plan, (4) kinder reframe
-    """
     pairs = []
     for i in range(max(len(selfs), len(monsters))):
         if i < len(selfs):
@@ -313,8 +304,7 @@ Rules:
   4) offer a kinder reframe of the situation.
 - Context-specific, natural phrasing (avoid generic platitudes).
 - No clinical claims. No toxic positivity. No questions.
-""".strip()
-
+"""
     try:
         resp = client.chat.completions.create(
             model=REPLY_MODEL,
@@ -324,40 +314,18 @@ Rules:
                 {"role": "user", "content": prompt},
             ],
         )
-        out = (resp.choices[0].message.content or "").strip()
-        data = json.loads(out)
+        data = json.loads(resp.choices[0].message.content)
         sugs = data.get("suggestions") or []
         clean = []
         for s in sugs:
-            if not isinstance(s, str): 
-                continue
-            s = s.strip()
-            if not s.lower().startswith("i "): 
-                continue
-            wc = len(s.split())
-            if 6 <= wc <= 14:
-                clean.append(s)
-        # fallback if model reply malformed/empty
-        if len(clean) < 4:
-            fallback = [
-                "I notice what I’m feeling, and it makes sense right now.",
-                "I can recognise my effort and let that count for something.",
-                "I’ll take one small step next, then give myself a short break.",
-                "I’m learning to speak to myself with a kinder voice.",
-            ]
-            clean = (clean + fallback)[:4]
-        uniq = []
-        for s in clean:
-            if s not in uniq:
-                uniq.append(s)
-        return uniq[:4]
+            if isinstance(s, str):
+                s = s.strip()
+                if s.lower().startswith("i ") and 6 <= len(s.split()) <= 14:
+                    clean.append(s)
+        return clean[:3]  # ✅ Only return the first 3, even if we got 4+
     except Exception:
-        return [
-            "I notice what I’m feeling, and it makes sense right now.",
-            "I can recognise my effort and let that count for something.",
-            "I’ll take one small step next, then give myself a short break.",
-            "I’m learning to speak to myself with a kinder voice.",
-        ]
+        return []
+
 
 # ------------ DB Helpers ------------
 def insert_user(display_name: Optional[str], trusted_contact: Optional[str]) -> str:
