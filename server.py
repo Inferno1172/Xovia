@@ -546,16 +546,16 @@ def post_message(body: MessageCreate):
     composed = "\n\n".join(parts)
 
     # final Lumen reply after 6 messages
-    ai = client.responses.create(
+    ai = client.chat.completions.create(
         model=REPLY_MODEL,
         temperature=0.3,
-        input=[
+        messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": composed}
         ]
     )
-    reply = parse_output_text(ai)
-    insert_message(body.sessionId, "angel", reply)
+    reply = ai.choices[0].message.content.strip()
+
 
     # (optional) rolling session summary update — best-effort
     try:
@@ -572,12 +572,13 @@ def post_message(body: MessageCreate):
             "Keep to about 250–300 tokens.\n\n"
             + "\n".join([f"{h['role'].upper()}: {h['text']}" for h in history])
         )
-        sum_resp = client.responses.create(
+        sum_resp = client.chat.completions.create(
             model=REPLY_MODEL,
             temperature=0.2,
-            input=[{"role": "user", "content": sum_prompt}]
+            messages=[{"role": "user", "content": sum_prompt}]
         )
-        new_summary = parse_output_text(sum_resp).strip()
+        new_summary = sum_resp.choices[0].message.content.strip()
+
         if new_summary:
             set_sql_summary(body.sessionId, new_summary)
     except Exception:
