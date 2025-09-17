@@ -247,14 +247,15 @@ def classify_negatives_with_model(texts: List[str]) -> List[bool]:
         + "\n".join([f"#{i+1}: {json.dumps(t)}" for i, t in enumerate(texts)])
     )
     try:
-        resp = client.responses.create(
+        resp = client.chat.completions.create(
             model=TONE_MODEL,
-            input=[
+            temperature=0,
+            messages=[
                 {"role": "system", "content": "Return only valid JSON. No preface."},
                 {"role": "user", "content": prompt},
             ],
         )
-        out = parse_output_text(resp)
+        out = (resp.choices[0].message.content or "").strip()
         data = json.loads(out)
         labels = data.get("labels")
         if isinstance(labels, list) and len(labels) == len(texts):
@@ -262,6 +263,7 @@ def classify_negatives_with_model(texts: List[str]) -> List[bool]:
     except Exception:
         pass
     return [looks_negative_local(t) for t in texts]
+
 
 # --------- NEW: personalised suggestions using the WHOLE current conversation ---------
 def _truncate(s: str, limit: int) -> str:
@@ -278,14 +280,13 @@ def generate_self_suggestions_full_context(selfs: List[str], monsters: List[str]
       - ZERO-ECHO: do not repeat harsh labels/slurs
       - provide variety: (1) validate/feelings, (2) strengths/values/effort, (3) tiny step/plan, (4) kinder reframe
     """
-    # Build compact context list like "SELF1: ..., MONSTER1: ..."
     pairs = []
     for i in range(max(len(selfs), len(monsters))):
         if i < len(selfs):
             pairs.append(f"SELF{i+1}: {selfs[i]}")
         if i < len(monsters):
             pairs.append(f"MONSTER{i+1}: {monsters[i]}")
-    convo = _truncate(" | ".join(pairs), 1600)  # keep token usage in check
+    convo = _truncate(" | ".join(pairs), 1600)
 
     last_self = selfs[-1] if selfs else ""
     last_mon  = monsters[-1] if monsters else ""
@@ -312,26 +313,31 @@ Rules:
   4) offer a kinder reframe of the situation.
 - Context-specific, natural phrasing (avoid generic platitudes).
 - No clinical claims. No toxic positivity. No questions.
-"""
+""".strip()
+
     try:
-        resp = client.responses.create(
-            model=REPLY_MODEL, temperature=0.2,
-            input=[
+        resp = client.chat.completions.create(
+            model=REPLY_MODEL,
+            temperature=0.2,
+            messages=[
                 {"role": "system", "content": "Return only valid JSON. No preface."},
                 {"role": "user", "content": prompt},
             ],
         )
-        data = json.loads(parse_output_text(resp))
+        out = (resp.choices[0].message.content or "").strip()
+        data = json.loads(out)
         sugs = data.get("suggestions") or []
         clean = []
         for s in sugs:
-            if not isinstance(s, str): continue
+            if not isinstance(s, str): 
+                continue
             s = s.strip()
-            if not s.lower().startswith("i "): continue
+            if not s.lower().startswith("i "): 
+                continue
             wc = len(s.split())
             if 6 <= wc <= 14:
                 clean.append(s)
-        # Fallbacks (neutral but session-aware phrasing)
+        # fallback if model reply malformed/empty
         if len(clean) < 4:
             fallback = [
                 "I notice what I’m feeling, and it makes sense right now.",
@@ -340,10 +346,10 @@ Rules:
                 "I’m learning to speak to myself with a kinder voice.",
             ]
             clean = (clean + fallback)[:4]
-        # de-dup
         uniq = []
         for s in clean:
-            if s not in uniq: uniq.append(s)
+            if s not in uniq:
+                uniq.append(s)
         return uniq[:4]
     except Exception:
         return [
