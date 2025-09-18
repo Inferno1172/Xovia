@@ -540,3 +540,40 @@ body {
     padding: 12px 12px;
   }
 }
+
+
+/* --- Character badges --- */
+
+/* Monster's angry badge (top-right) */
+#monsterBlob::after{
+  content: "💢";
+  position: absolute;
+  top: -3px;
+  right: -2px;
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(-10deg);
+  pointer-events: none;
+  filter: drop-shadow(0 1px 0 rgba(0,0,0,.15));
+  z-index: 6;
+}
+
+/* Self's golden halo */
+#selfBlob::before {
+  content: "";
+  position: absolute;
+  top: -14px;
+  left: 4px;
+  width: 80px;
+  height: 18px;
+  border: 4px solid rgba(255, 215, 0, 0.8); /* bright gold */
+  border-radius: 50% / 50%;
+  background: none;
+  /* glow */
+  box-shadow:
+    0 0 10px rgba(255, 215, 0, 0.6),
+    0 0 20px rgba(255, 200, 0, 0.4),
+    0 0 30px rgba(255, 180, 0, 0.2);
+  pointer-events: none;
+  z-index: 5;
+}
