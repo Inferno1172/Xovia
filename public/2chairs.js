@@ -52,7 +52,7 @@
       menu.style.display = 'none';
     }
   });
-  go1.addEventListener('click', () => { window.location.href = '/1to1.html'; });
+  go1.addEventListener('click', () => { window.location.href = '1to1.html'; });
 
 
   // ------------------ API helpers ------------------

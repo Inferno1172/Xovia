@@ -85,6 +85,9 @@ def init_db():
     except Exception: pass
     try: conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''")
     except Exception: pass
+    try: conn.execute("ALTER TABLE sessions ADD COLUMN tone TEXT DEFAULT 'professional'")
+    except Exception: pass
+
     conn.commit()
 
 init_db()
@@ -102,6 +105,26 @@ class MessageCreate(BaseModel):
     sessionId: str
     role: Literal["self","monster"]
     text: str
+
+class ToneUpdate(BaseModel):
+    tone: Literal["professional","casual"]
+
+def get_session_tone(session_id: str) -> str:
+    row = conn.execute("SELECT tone FROM sessions WHERE id=?", (session_id,)).fetchone()
+    return (row["tone"] if row and row["tone"] else "professional")
+
+def set_session_tone(session_id: str, tone: str):
+    conn.execute("UPDATE sessions SET tone=? WHERE id=?", (tone, session_id))
+    conn.commit()
+
+@app.post("/api/session/{session_id}/tone")
+def update_tone(session_id: str, body: ToneUpdate):
+    if body.tone not in ("professional","casual"):
+        raise HTTPException(status_code=400, detail="tone must be 'professional' or 'casual'")
+    if not get_session_status(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    set_session_tone(session_id, body.tone)
+    return {"ok": True, "tone": body.tone}
 
 # ------------ Therapy Prompts & Checks ------------
 SYSTEM_PROMPT = """
@@ -523,14 +546,30 @@ def post_message(body: MessageCreate):
         parts.append(block)
         composed = "\n\n".join(parts)
 
+        def system_prompt_for(tone: str) -> str:
+            if tone == "casual":
+                return """
+        You are Lumen in a 1-to-1 wellness chat.
+
+        • Style: warm, friendly, everyday; short lines; simple words.
+        • Validate → gently challenge → reframe → one small next step.
+        • Avoid clinical phrasing and avoid being a yes-man.
+        • ZERO-ECHO: don’t repeat harsh wording; refer indirectly (“that harsh thought”).
+        • No diagnosis or treatment claims; keep it supportive and practical.
+        """.strip()
+            return SYSTEM_PROMPT
+
+        tone = get_session_tone(body.sessionId)
+
         ai = client.chat.completions.create(
             model=REPLY_MODEL,
             temperature=0.3,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt_for(tone)},
                 {"role": "user", "content": composed}
             ]
         )
+
         reply = ai.choices[0].message.content.strip()
         insert_message(body.sessionId, "angel", reply)
 

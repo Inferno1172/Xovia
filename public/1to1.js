@@ -3,6 +3,74 @@
     const BASE = ""; // same orgin as render
     const SPEED = 10; const MAX_RETRIES = 3; const RETRY_DELAY = 1000;
 
+        // Settings (Tone)
+    const settingsModal = document.getElementById('settingsModal');
+    const mSettings     = document.getElementById('mSettings');
+    const toneGroup     = document.getElementById('toneGroup');
+    const toneCancel    = document.getElementById('toneCancel');
+    const toneSave      = document.getElementById('toneSave');
+
+    const TONE_KEY = 'xoviaTone'; // 'professional' | 'casual'
+    function getTone(){ return localStorage.getItem(TONE_KEY) || 'professional'; }
+    function setTone(t){ localStorage.setItem(TONE_KEY, t); }
+
+
+    function openSettings(){
+  // mark current tone
+  const t = getTone();
+  [...toneGroup.querySelectorAll('.toneCard')].forEach(card=>{
+    const v = card.querySelector('input').value;
+    card.classList.toggle('selected', v===t);
+  });
+  settingsModal.classList.add('open');
+}
+function closeSettings(){ settingsModal.classList.remove('open'); }
+
+mSettings.addEventListener('click', ()=>{ openSettings(); closeMenu(); });
+toneCancel.addEventListener('click', closeSettings);
+settingsModal.addEventListener('click', (e)=>{ if(e.target===settingsModal) closeSettings(); });
+toneGroup.addEventListener('click', (e)=>{
+  const card = e.target.closest('.toneCard'); if(!card) return;
+  [...toneGroup.querySelectorAll('.toneCard')].forEach(c=> c.classList.remove('selected'));
+  card.classList.add('selected');
+});
+
+
+toneSave.addEventListener('click', async ()=>{
+  const chosen = toneGroup.querySelector('.toneCard.selected input')?.value || 'professional';
+  setTone(chosen);
+  closeSettings();
+  // sync to server if we have a session
+  if(sessionId){
+    try{
+      await fetch(`/api/session/${sessionId}/tone`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tone: chosen })
+      });
+    }catch(_){}
+  }
+});
+
+
+async function createSession(){
+  const r = await fetchWithRetry(BASE + '/api/session', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ mode:'therapist-room' })
+  });
+  const j = await r.json(); sessionId = j.sessionId;
+  // set initial tone for this session
+  try{
+    await fetch(`/api/session/${sessionId}/tone`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ tone: getTone() })
+    });
+  }catch(_){}
+  return sessionId;
+}
+
+
     // Mode switching
     const tabCharacter = document.getElementById('tabCharacter');
     const tabChat = document.getElementById('tabChat');
@@ -52,23 +120,7 @@
     let inFlight = false;
     let lastFull = panelText.textContent;
 
-    // after other menu refs
-    const mTwoChairs = document.getElementById('mTwoChairs');
-
-    // open/close menu
-    menuBtn.addEventListener('click', () => {
-      menuPanel.classList.toggle('open');
-    });
-    document.addEventListener('click', (e)=>{
-      if(!menuPanel.contains(e.target) && e.target !== menuBtn) {
-        menuPanel.classList.remove('open');
-      }
-    });
-
-    // navigate
-    mTwoChairs.addEventListener('click', ()=>{
-      window.location.href = '/2chairs.html';
-    });
+    
 
 
     function setMode(next){
@@ -110,10 +162,6 @@
       }
     }
 
-    async function createSession(){
-      const r = await fetchWithRetry(BASE + '/api/session', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode:'therapist-room' }) });
-      const j = await r.json(); sessionId = j.sessionId; return sessionId;
-    }
 
     async function sendMessage(text){
       const r = await fetchWithRetry(BASE + '/api/message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ sessionId, role:'self', text }) });
@@ -236,3 +284,5 @@
     setMode('character');
     setTimeout(applyClamp, 60);
   })();
+
+ 
