@@ -233,12 +233,27 @@ body {
 }
 
 /* Make the blob sit "into" the chair a bit */
+/* FIXED BLOB ANIMATIONS */
 .blob{
-  box-shadow:
-    0 10px 20px rgba(0,0,0,.12),
-    inset 0 0 0 0 transparent; /* keep clean */
-  transform-origin: center bottom;
+  position:absolute; bottom:25px; left:13px;
+  width:95px; height:85px;
+  border-radius:30px;
+  background:var(--green);
+  z-index:3;
+
+  /* keep badges visible and on top */
+  isolation: isolate;      /* <-- add this */
+  overflow: visible;       /* <-- add this */
+
+  transform-origin:center center;
+  transition: transform .28s cubic-bezier(.22,.61,.36,1);
+  will-change: transform;
+
+  /* Default idle state */
+  animation: idle-breathe 4s ease-in-out infinite;
 }
+
+
 
 /* When the character is talking, add a tiny reactive tilt/bounce to the chair */
 .chair.speaking .back{
@@ -542,31 +557,26 @@ body {
 }
 
 
-/* --- Character badges --- */
 #selfBlob .halo,
-#monsterBlob .angry { position:absolute; pointer-events:none; }
-
-/* Self’s golden halo */
-#selfBlob .halo{
-  top: -14px; left: 4px;
-  width: 80px; height: 18px;
-  border: 4px solid rgba(255, 215, 0, 0.8);
-  border-radius: 50% / 50%;
-  background: none;
-  box-shadow:
-    0 0 10px rgba(255, 215, 0, 0.6),
-    0 0 20px rgba(255, 200, 0, 0.4),
-    0 0 30px rgba(255, 180, 0, 0.2);
-  z-index: 5;
+#monsterBlob .angry{
+  position:absolute;
+  display:block;
+  pointer-events:none;
 }
 
-/* Monster’s angry badge */
+#selfBlob .halo{ top:-14px; left:4px; width:80px; height:18px;
+  border:4px solid rgba(255,215,0,.8); border-radius:50%/50%;
+  box-shadow:0 0 10px rgba(255,215,0,.6),
+             0 0 20px rgba(255,200,0,.4),
+             0 0 30px rgba(255,180,0,.2);
+  z-index:5;
+}
+
 #monsterBlob .angry{
-  top: -3px; right: -2px;
-  font-size: 18px; line-height: 1;
-  transform: rotate(-10deg);
-  filter: drop-shadow(0 1px 0 rgba(0,0,0,.15));
-  z-index: 6;
+  top:-3px; right:-2px; font-size:18px; line-height:1;
+  transform:rotate(-10deg);
+  filter:drop-shadow(0 1px 0 rgba(0,0,0,.15));
+  z-index:6;
 }
 
 
