@@ -40,6 +40,21 @@
   const helpBtn = document.getElementById("helpBtn");
   const helpClose = document.getElementById("helpClose");
 
+  const burger = document.getElementById('burger');
+  const menu = document.getElementById('menu');
+  const go1 = document.getElementById('go1to1');
+
+  burger.addEventListener('click', () => {
+    menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+  });
+  document.addEventListener('click', (e)=>{
+    if(menu && !menu.contains(e.target) && e.target !== burger) {
+      menu.style.display = 'none';
+    }
+  });
+  go1.addEventListener('click', () => { window.location.href = '/1to1.html'; });
+
+
   // ------------------ API helpers ------------------
   async function fetchWithRetry(url, opts, retries = MAX_RETRIES) {
     for (let i = 0; i <= retries; i++) {

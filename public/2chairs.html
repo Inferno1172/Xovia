@@ -3,8 +3,8 @@
     <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Two Chairs - XOVIA Wellness</title>
-    <link rel="stylesheet" href="/styles.css">
+    <title>2 Chairs Dialog</title>
+    <link rel="stylesheet" href="./2chairs.css">
     </head>
     <body>
     <div class="phone">
@@ -14,10 +14,13 @@
         <!-- header -->
         <div class="appbar">
    <img src="xovia.jpg" alt="XOVIA Wellness Logo" class="avatar">
-    <div class="title">XOVIA Wellness</div>
-    <div class="actions">
+    <div class="title">2 Chairs Dialog</div>
+        <div class="actions">
         <button class="helpbtn" id="helpBtn" aria-label="Help" title="Help">?</button>
-        <div class="burger" role="button" tabindex="0" aria-label="Menu"><span></span></div>
+        <div class="burger" id="burger" role="button" tabindex="0" aria-label="Menu"><span></span></div>
+        <div id="menu" class="menu" role="menu" aria-label="Actions" style="display:none; position:absolute; right:12px; top:56px; background:#fff; border:1px solid #e9ded3; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.12);">
+        <button class="menuItem" id="go1to1" style="padding:10px 12px; background:#fff; border:0; width:180px; text-align:left; font-weight:800; color:#3b220b; cursor:pointer;">Switch to 1-to-1</button>
+    </div>
     </div>
     </div>
 
@@ -167,6 +170,6 @@
         </div>
         </div>
     </div>
-    <script src="/script.js"></script>
+    <script src="./2chairs.js"></script>
     </body>
     </html> 

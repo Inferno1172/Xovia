@@ -4,6 +4,7 @@ from typing import List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -27,13 +28,13 @@ if not OPENAI_API_KEY:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ------------ FastAPI ------------
-app = FastAPI(title="Two Chairs Backend (Python)")
+app = FastAPI(title="XOVIA Backend")
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r".*",   # accept everything, including file:// (null origin)
+    allow_origin_regex=r".*",   # accept everything incl. file:// (null origin) if needed
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=False,    # keep False when using wildcard origins
+    allow_credentials=False,
 )
 
 # ------------ SQLite ------------
@@ -79,6 +80,7 @@ def init_db():
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     );
     """)
+    # gentle, idempotent migrations for existing DBs
     try: conn.execute("ALTER TABLE users ADD COLUMN user_summary TEXT DEFAULT ''")
     except Exception: pass
     try: conn.execute("ALTER TABLE sessions ADD COLUMN summary TEXT DEFAULT ''")
@@ -103,11 +105,10 @@ class MessageCreate(BaseModel):
 
 # ------------ Therapy Prompts & Checks ------------
 SYSTEM_PROMPT = """
-export const SYSTEM_PROMPT = `
-You are Lumen, the Angel voice in a mental-health wellness app called **XOVIA** under the *Two Chairs Dialogue*.
+You are Lumen, the Angel voice in a mental-health wellness app called XOVIA.
 
 ## Mission & Boundaries
-- Help users explore Self vs Monster (inner critic).
+- Support users in a compassionate 1-to-1 chat.
 - Build safety, care, and unconditional acceptance.
 - Provide wellness support only; no diagnosis, no treatment claims, no promises of safety.
 
@@ -116,26 +117,26 @@ You are Lumen, the Angel voice in a mental-health wellness app called **XOVIA** 
 - Adapt to stage of change.
 - Tone: warm, calm, professional; short paragraphs; plain words.
 - Use therapist-like phrasing; avoid being a yes-man.
+- ZERO-ECHO: never repeat harsh negative wording; refer to it indirectly (“that harsh thought”, “that fear”).
 
-## Two Chairs Protocol
-- The frontend collects 3 pairs: SELF1/MONSTER1, SELF2/MONSTER2, SELF3/MONSTER3.
-- Backend calls you with CYCLE_READY: true + the 6 snippets, or a single message clearly containing all 6 labeled snippets.
-- Only with a full cycle, produce one integrated reply that validates, challenges distortions, and proposes one small actionable next step.
-- If not a full cycle (CYCLE_READY: false), reply with ONE sentence that advances the protocol (e.g., prompt the next Self/Monster message).
+## 1-to-1 Protocol
+- Reply to each user message (no cycle gating).
+- Each reply: 2–4 short paragraphs + one specific, doable next step.
+- At most 1–2 short questions.
 
 ## Safety & Crisis
-- If any suicidal/self-harm/violence risk appears:
-  1) Output exactly: “We identified harmful words in your conversation. Life is worth living — you are not alone. We’ve alerted your chosen trusted contact. In the meantime, click below to see all available help and hotlines: {{SOS_URL}}”
-  2) Stop. Do not continue normal dialogue.
-
-## Personalization
-- Assume prior messages are stored; you may briefly reference past themes to personalize support.
+- If self-harm or violence risk is present, keep language supportive and concise.
+- The server handles any crisis alerts and hotline UI.
 
 ## Output Rules
-- CYCLE_READY: true → 2–4 short paragraphs + one specific next step.
-- CYCLE_READY: false → one-sentence coaching prompt.
-- No diagnosis. No medical claims. No long lectures.
-`;
+- Keep it compact (~140–200 words), warm, and practical.
+"""
+
+TEACHING_COPY = """Two Chairs Dialogue:
+This is a short exercise where your "True Self" and your "Inner Critic (Monster)" take turns.
+• Step 1: Write as your True Self (what you hope, believe, or want).
+• Step 2: Write as your Monster (the discouraging voice).
+Repeat for 3 exchanges (Self → Monster) × 3. After that, I (Lumen) will respond with support and one practical next step.
 """
 
 CRISIS_PATTERNS = [
@@ -166,7 +167,7 @@ NEGATIVE_HINTS = [
 
 USE_MODEL_TONE = False
 
-# --- Memory knobs (make recall easy) ---
+# --- Memory knobs ---
 ALWAYS_INCLUDE_SESSION_SUMMARY = False
 ALWAYS_INCLUDE_USER_SUMMARY    = False
 MIN_OVERLAP                    = 2
@@ -183,10 +184,10 @@ def _kw(s: str) -> set:
     import re
     return {w for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) >= 3 and w not in _STOP}
 
-def is_connected_to_summary(current_round_text: str, summary_text: str, min_overlap: int = 3) -> bool:
+def is_connected_to_summary(current_text: str, summary_text: str, min_overlap: int = 3) -> bool:
     if not summary_text:
         return False
-    return len(_kw(current_round_text) & _kw(summary_text)) >= min_overlap
+    return len(_kw(current_text) & _kw(summary_text)) >= min_overlap
 
 def get_current_cycle(session_id: str):
     cur = conn.cursor()
@@ -227,19 +228,21 @@ Now respond as Lumen. Follow your rules and the ZERO-ECHO rule:
 Keep it warm and compact. Aim for around 180–230 words, with at most 1–2 short questions.
 """.strip()
 
-def parse_output_text(resp) -> str:
-    text = getattr(resp, "output_text", None)
-    if text:
-        return text.strip()
-    try:
-        blocks = resp.output[0].content
-        for b in blocks:
-            if b.type == "output_text":
-                return b.text.strip()
-    except Exception:
-        pass
-    return "I'm here with you."
+# ---- Therapist-room prompt ----
+def build_therapist_prompt(history: List[dict]) -> str:
+    recent = history[-12:]
+    lines = []
+    for h in recent:
+        who = "SELF" if h["role"] == "self" else ("LUMEN" if h["role"] == "angel" else h["role"].upper())
+        lines.append(f"{who}: {h['text']}")
+    return (
+        "We are in a 1-to-1 wellness conversation.\n"
+        "Recent context:\n\n" + "\n".join("• " + l for l in lines) + "\n\n"
+        "Respond as Lumen following your rules. Avoid echoing harsh wording. "
+        "Validate briefly, gently challenge, reframe, then offer one small next step today."
+    )
 
+# ---- Negativity classifier (model-backed; falls back to heuristic) ----
 def classify_negatives_with_model(texts: List[str]) -> List[bool]:
     prompt = (
         'Return JSON only: {"labels":[booleans matching each input as negative or not]}.\n'
@@ -264,8 +267,7 @@ def classify_negatives_with_model(texts: List[str]) -> List[bool]:
         pass
     return [looks_negative_local(t) for t in texts]
 
-
-# --------- NEW: personalised suggestions using the WHOLE current conversation ---------
+# ---- Mid-cycle SELF suggestions (Two Chairs) ----
 def _truncate(s: str, limit: int) -> str:
     if len(s) <= limit: return s
     return s[:limit-1] + "…"
@@ -278,7 +280,6 @@ def generate_self_suggestions_full_context(selfs: List[str], monsters: List[str]
         if i < len(monsters):
             pairs.append(f"MONSTER{i+1}: {monsters[i]}")
     convo = _truncate(" | ".join(pairs), 1600)
-
     last_self = selfs[-1] if selfs else ""
     last_mon  = monsters[-1] if monsters else ""
 
@@ -322,10 +323,9 @@ Rules:
                 s = s.strip()
                 if s.lower().startswith("i ") and 6 <= len(s.split()) <= 14:
                     clean.append(s)
-        return clean[:3]  # ✅ Only return the first 3, even if we got 4+
+        return clean[:3]
     except Exception:
         return []
-
 
 # ------------ DB Helpers ------------
 def insert_user(display_name: Optional[str], trusted_contact: Optional[str]) -> str:
@@ -405,7 +405,7 @@ def create_user(body: UserCreate):
 def create_session(body: SessionCreate):
     uid = body.userId or insert_user(display_name=None, trusted_contact=None)
     sid = insert_session(uid, body.mode or "two-chairs")
-    return {"sessionId": sid, "userId": uid, "teach": "Two Chairs ready."}
+    return {"sessionId": sid, "userId": uid, "teach": TEACHING_COPY}
 
 @app.get("/api/session/{session_id}/messages")
 def get_messages(session_id: str):
@@ -436,7 +436,7 @@ def post_message(body: MessageCreate):
             "resourcesUrl": SOS_RESOURCES_URL
         }
 
-    # local crisis
+    # local crisis detection (keywords)
     if check_crisis_local(text):
         insert_message(body.sessionId, body.role, text)
         insert_alert(body.sessionId, "crisis", {"matched": "keyword"})
@@ -450,7 +450,7 @@ def post_message(body: MessageCreate):
             "notifiedTrustedContact": False
         }
 
-    # moderation (OpenAI)
+    # moderation API (OpenAI)
     try:
         mod = client.moderations.create(model=MOD_MODEL, input=text)
         flagged = False
@@ -476,30 +476,124 @@ def post_message(body: MessageCreate):
     # store the message
     insert_message(body.sessionId, body.role, text)
 
-    # figure out cycle progress
+    # session mode
+    mode_row = conn.execute("SELECT mode FROM sessions WHERE id=?", (body.sessionId,)).fetchone()
+    mode = (mode_row["mode"] if mode_row and mode_row["mode"] else "two-chairs")
+
+    # ---------------- THERAPIST ROOM: immediate reply ----------------
+    if mode != "two-chairs":
+        # full history for prompt + negativity check
+        cur = conn.cursor()
+        cur.execute("SELECT role, text FROM messages WHERE session_id=? ORDER BY id ASC", (body.sessionId,))
+        history = [{"role": r["role"], "text": r["text"]} for r in cur.fetchall()]
+
+        # quick negativity over last 3 SELF turns
+        last_three_self = [h["text"] for h in history if h["role"] == "self"][-3:]
+        if USE_MODEL_TONE and len(last_three_self) == 3:
+            self_labels = classify_negatives_with_model(last_three_self)
+        else:
+            self_labels = [looks_negative_local(t) for t in last_three_self] if len(last_three_self) == 3 else []
+        safety = None
+        if len(self_labels) == 3 and all(self_labels):
+            insert_alert(body.sessionId, "cycle-negative", {"selfNegatives": self_labels, "mode": "therapist-room"})
+            safety = {
+                "showSafetyPopup": True,
+                "message": "Would you like extra support?",
+                "acceptRedirect": "/1to1.html",
+                "declineStay": True
+            }
+
+        # memory composition
+        session_summary = get_sql_summary(body.sessionId)
+        user_id = get_user_id_for_session(body.sessionId)
+        user_summary = get_user_summary(user_id) if user_id else ""
+
+        current_text = text
+        use_session_summary = bool(session_summary) if ALWAYS_INCLUDE_SESSION_SUMMARY else \
+            is_connected_to_summary(current_text, session_summary, min_overlap=MIN_OVERLAP)
+        use_user_summary = bool(user_summary) if ALWAYS_INCLUDE_USER_SUMMARY else \
+            is_connected_to_summary(current_text, user_summary, min_overlap=MIN_OVERLAP)
+
+        block = build_therapist_prompt(history)
+        parts = []
+        if use_user_summary and user_summary:
+            parts.append("Long-term context (previous sessions):\n" + user_summary)
+        if use_session_summary and session_summary:
+            parts.append("This-session context so far:\n" + session_summary)
+        parts.append(block)
+        composed = "\n\n".join(parts)
+
+        ai = client.chat.completions.create(
+            model=REPLY_MODEL,
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": composed}
+            ]
+        )
+        reply = ai.choices[0].message.content.strip()
+        insert_message(body.sessionId, "angel", reply)
+
+        # rolling session summary (best-effort)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT role, text FROM messages WHERE session_id=? ORDER BY id ASC",
+                (body.sessionId,)
+            )
+            history = [{"role": r["role"], "text": r["text"]} for r in cur.fetchall()]
+
+            sum_prompt = (
+                "Summarize the earlier conversation in 5–8 concise bullets. "
+                "Be concrete; capture themes, triggers, and helpful actions. "
+                "Avoid quoting harsh 'Monster' lines verbatim. "
+                "Keep to about 250–300 tokens.\n\n"
+                + "\n".join([f"{h['role'].upper()}: {h['text']}" for h in history])
+            )
+
+            sum_resp = client.chat.completions.create(
+                model=REPLY_MODEL,
+                temperature=0.2,
+                messages=[{"role": "user", "content": sum_prompt}]
+            )
+            new_summary = (sum_resp.choices[0].message.content or "").strip()
+            if new_summary:
+                set_sql_summary(body.sessionId, new_summary)
+
+        except Exception:
+            pass
+
+
+        return {
+            "awaitMore": False,
+            "angel": reply,
+            "lumen": reply,
+            "safety": safety,
+            "next": {"askToContinue": True}
+        }
+
+    # ---------------- TWO CHAIRS: gated flow ----------------
     selfs, monsters = get_current_cycle(body.sessionId)
     total = len(selfs) + len(monsters)
 
-    # -------- Suggestions after ANY Monster turn while cycle isn't complete --------
+    # While collecting, return progress; if last was Monster, include SELF suggestions
     if total < 6:
         payload = {
             "awaitMore": True,
             "have": {"self": len(selfs), "monster": len(monsters)},
             "need": 6 - total
         }
-        # If last message was Monster → next input is SELF → include 4 suggestions using FULL CONTEXT
-        if body.role == "monster" and len(monsters) >= 1 and len(selfs) == len(monsters):
+        if (body.role == "monster") and len(monsters) >= 1 and len(selfs) == len(monsters):
             payload["suggestions"] = generate_self_suggestions_full_context(selfs, monsters)
         return payload
-    # -----------------------------------------------------------------------------
 
-    # tone (for safety popup after full cycle)
+    # tone for safety popup after full cycle
     if USE_MODEL_TONE:
         self_labels = classify_negatives_with_model(selfs)
     else:
         self_labels = [looks_negative_local(t) for t in selfs]
 
-    # memory composition
+    # memory composition (two-chairs)
     current_round_text = " ".join(selfs + monsters)
     session_summary = get_sql_summary(body.sessionId)
     user_id = get_user_id_for_session(body.sessionId)
@@ -529,15 +623,12 @@ def post_message(body: MessageCreate):
         ]
     )
     reply = ai.choices[0].message.content.strip()
+    insert_message(body.sessionId, "angel", reply)
 
-
-    # (optional) rolling session summary update — best-effort
+    # update rolling session summary (best-effort)
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT role, text FROM messages WHERE session_id=? ORDER BY id ASC",
-            (body.sessionId,)
-        )
+        cur.execute("SELECT role, text FROM messages WHERE session_id=? ORDER BY id ASC", (body.sessionId,))
         history = [{"role": r["role"], "text": r["text"]} for r in cur.fetchall()]
         sum_prompt = (
             "Summarize the earlier conversation in 5–8 concise bullets. "
@@ -546,13 +637,13 @@ def post_message(body: MessageCreate):
             "Keep to about 250–300 tokens.\n\n"
             + "\n".join([f"{h['role'].upper()}: {h['text']}" for h in history])
         )
+
         sum_resp = client.chat.completions.create(
             model=REPLY_MODEL,
             temperature=0.2,
             messages=[{"role": "user", "content": sum_prompt}]
         )
-        new_summary = sum_resp.choices[0].message.content.strip()
-
+        new_summary = (sum_resp.choices[0].message.content or "").strip()
         if new_summary:
             set_sql_summary(body.sessionId, new_summary)
     except Exception:
@@ -566,7 +657,7 @@ def post_message(body: MessageCreate):
         safety = {
             "showSafetyPopup": True,
             "message": "Would you like to switch to the 1-on-1 Therapist Room?",
-            "acceptRedirect": "/therapist-room",
+            "acceptRedirect": "/1to1.html",
             "declineStay": True
         }
 
@@ -578,12 +669,8 @@ def post_message(body: MessageCreate):
         "next": {"askToContinue": True}
     }
 
-from fastapi.staticfiles import StaticFiles
-
-# Serve everything in ./public at /
+# ------------ Static mount (serve /public) ------------
 app.mount("/", StaticFiles(directory="public", html=True), name="public")
 
-# ------------- Notes (run with uvicorn) -------------
-# pip install -r requirements.txt
+# Run locally:
 # uvicorn server:app --reload --host 0.0.0.0 --port 3000
-# http://127.0.0.1:3000/api/health

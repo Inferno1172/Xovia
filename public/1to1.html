@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>XOVIA · Your Companion (2 Modes)</title>
+  <link rel="stylesheet" href="./1to1.css">
+</head>
+<body>
+  <div class="phone" id="phone">
+    <div class="appbar">
+      <div class="brand"><div class="avatar"></div><div>XOVIA<br>Your Companion</div></div>
+      <div class="seg" role="tablist" aria-label="Mode switch">
+        <button id="tabCharacter" class="active" role="tab" aria-selected="true">Character</button>
+        <button id="tabChat" role="tab" aria-selected="false">Chat Log</button>
+      </div>
+      <div id="menuBtn" class="menuBtn" role="button" tabindex="0" aria-label="Menu"><span></span></div>
+      <div id="menuPanel" class="menuPanel" role="menu" aria-label="Actions">
+        <button class="menuItem" id="mTwoChairs" role="menuitem">Switch to Two Chairs</button>
+        <button class="menuItem" id="mNew" role="menuitem">Start New</button>
+        <div class="menuHr"></div>
+        <button class="menuItem" id="mJournal" role="menuitem">Open Journal</button>
+        <button class="menuItem" id="mCopy" role="menuitem">Copy Last Reply</button>
+        <div class="menuHr"></div>
+        <button class="menuItem" id="mHelp" role="menuitem">Help & Hotlines</button>
+      </div>
+    </div>
+
+    <div class="views">
+      <!-- CHARACTER MODE -->
+      <section id="viewCharacter" class="panel" aria-label="Character mode">
+        <div class="sky">
+          <div class="panelBubble" id="panelBubble">
+            <p id="panelText" class="clamp">Hi, I’m here with you. What feels most important to talk about today?</p>
+            <div class="tapHint" id="tapHint">… tap to read full</div>
+          </div>
+          <div class="lumenWrap" aria-hidden="true">
+            <div class="eyes"><div class="eye"></div><div class="eye"></div></div>
+          </div>
+        </div>
+        <div class="ground">
+          <div class="pod">
+            <input id="charInput" type="text" placeholder="Tell Lumen what’s on your mind…" maxlength="2000" />
+            <button id="charSend">Send</button>
+          </div>
+          <button class="journalBtn" id="openJournal1">📔 Journal</button>
+        </div>
+      </section>
+
+      <!-- CHAT MODE (log-only, read-only) -->
+      <section id="viewChat" class="chat hidden" aria-label="Chat log mode">
+        <div class="logHint">This is your conversation log. Switch to <strong>Character</strong> to continue chatting.</div>
+        <div class="timeline" id="timeline"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Journal / Transcript -->
+  <div class="modal" id="journal" role="dialog" aria-modal="true" aria-labelledby="journalTitle">
+    <div class="sheet">
+      <div class="head"><div class="title" id="journalTitle">Conversation Journal</div></div>
+      <div class="body" id="journalBody"></div>
+      <div class="actions">
+        <button class="btn" id="exportBtn">Export .txt</button>
+        <button class="btn primary" id="closeJournal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full Message Modal (for Character mode bubble) -->
+  <div class="modal" id="fullModal" role="dialog" aria-modal="true" aria-labelledby="fullTitle">
+    <div class="sheet">
+      <div class="head"><div class="title" id="fullTitle">Lumen’s Full Message</div></div>
+      <div class="body"><div id="fullText" style="white-space:pre-wrap"></div></div>
+      <div class="actions"><button class="btn primary" id="closeFull">Close</button></div>
+    </div>
+  </div>
+
+  <!-- SOS / Crisis -->
+  <div class="sos" id="sos" role="dialog" aria-modal="true" aria-labelledby="sosTitle">
+    <div class="soscard">
+      <div class="soshead"><div class="sostitle" id="sosTitle">⚠ We're here with you</div></div>
+      <div class="sosbody">
+        <p id="sosMsg">We identified harmful words in your conversation. Life is worth living — you are not alone.</p>
+        <div class="soslist">
+          <a id="sosLink" class="pillbtn" href="#" target="_blank" rel="noopener">🔗 See Help & Hotlines</a>
+          <a id="sosResources" class="pillbtn" href="#" target="_blank" rel="noopener">📘 Open Safety Resources</a>
+        </div>
+      </div>
+      <div class="sosactions">
+        <button class="btn" id="sosClose">Close</button>
+        <button class="btn primary" id="sosReset">Start New</button>
+      </div>
+    </div>
+  </div>
+  <script src="./1to1.js"></script>
+</body>
+</html>
