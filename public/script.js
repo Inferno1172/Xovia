@@ -132,6 +132,20 @@
     updateStackHeight();
   }
 
+  // NEW → Monster-turn helper (replaces the default two cards on MONSTER turns)
+  function showMonsterGuide() {
+    if (!cards) return;
+    cards.innerHTML = `
+      <div class="card">
+        <h4>Write as your Monster</h4>
+        <div class="ghost"><strong>Say it exactly</strong> how it shows up in your head — even if it’s harsh.</div>
+        <div class="ghost"><strong>Keep it short:</strong> 1–2 sentences.</div>
+        <div class="ghost"><strong>Point it at this situation</strong> (exam, surgery, relationship, etc.).</div>
+      </div>
+    `;
+    updateStackHeight();
+  }
+
   // ---------- Layout ----------
   function updateStackHeight() {
     if (!phone) return;
@@ -337,12 +351,16 @@
       paintPills(steps);
 
       if (j.awaitMore) {
+        // flip turn
         role = role === "self" ? "monster" : "self";
         setComposerRole();
         focusAfterSend = true;
 
+        // SELF: show suggestions (if provided). MONSTER: show the new guide.
         if (role === "self" && Array.isArray(j.suggestions) && j.suggestions.length) {
           showSuggestions(j.suggestions);
+        } else if (role === "monster") {
+          showMonsterGuide();
         } else {
           restoreDefaultCards();
         }
